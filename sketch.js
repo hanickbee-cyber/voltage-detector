@@ -1,5 +1,5 @@
 // ==========================================
-// 검전기 시뮬레이션 (거리 비례 물리엔진 및 복원력 적용)
+// 검전기 시뮬레이션 (힘 완화, 금속박 동적 개폐 적용)
 // ==========================================
 
 let nuclei = [];
@@ -18,10 +18,13 @@ let rod = {
   electrons: []
 };
 
+// 금속박 각도 관련 상태값
+let currentLeafAngle = 5; // 기본 살짝 벌어진 각도 (도 단위)
+
 function setup() {
   createCanvas(600, 700);
   
-  // 검전기 내부 원자핵 배치
+  // 검전기 원자핵 배치
   nuclei.push(new Nucleus(240, 215, 'plate'));
   nuclei.push(new Nucleus(280, 215, 'plate'));
   nuclei.push(new Nucleus(320, 215, 'plate'));
@@ -33,7 +36,6 @@ function setup() {
   nuclei.push(new Nucleus(315, 460, 'leaf_R'));
   nuclei.push(new Nucleus(325, 520, 'leaf_R'));
 
-  // 자유 전자 생성 시, 자신의 짝꿍(Home) 원자핵을 기억하도록 설정
   for (let n of nuclei) {
     electrons.push(new Electron(n.x, n.y, true, n));
   }
@@ -45,45 +47,106 @@ function draw() {
   background(245);
 
   drawUI();
+  
+  // 1. 하단 금속박의 알짜 전하량 계산 및 각도 업데이트
+  updateLeafAngle();
+
+  // 2. 검전기 외형 그리기 (동적 각도 반영)
   drawElectroscopeBody();
+  
   drawRod();
-  drawStemVectors(); // 화살표는 시각적 안내 역할만 수행
+  drawStemVectors();
 
   for (let n of nuclei) {
     n.draw();
   }
 
-  // ----------------------------------------------------
-  // 핵심 물리 엔진: 대전체와 자유 전자 간의 쿨롱의 힘 계산
-  // ----------------------------------------------------
+  // 3. 쿨롱 힘 계산 (70% 수준으로 스케일 다운)
   let q_rod = 0;
   if (rod.type === 'positive') q_rod = 1;
   if (rod.type === 'negative') q_rod = -1;
 
   for (let e of electrons) {
-    let fx = random(-0.3, 0.3); // 자연스러운 미세 진동
+    let fx = random(-0.2, 0.2);
     let fy = 0;
 
-    // 대전체가 중성이 아닐 때만 외부 힘 작용
     if (q_rod !== 0) {
       let dx = e.x - rod.x;
       let dy = e.y - rod.y;
-      let dSq = dx * dx + dy * dy; // 거리의 제곱
-      dSq = max(dSq, 3000); // 0으로 나누어지는 오류(무한대 힘) 방지
+      let dSq = dx * dx + dy * dy;
+      dSq = max(dSq, 4000); // 근접 폭주 방지 완충값 상향
       
       let d = sqrt(dSq);
       
-      // 쿨롱의 법칙 응용: 거리가 가까울수록 힘이 기하급수적으로 강해짐
-      // q_rod가 +1이면 인력(-방향), -1이면 척력(+방향)
-      let forceMag = (q_rod * -1) * (150000 / dSq); 
+      // 기존 150000 -> 105000 (정확히 70% 수준으로 완화)
+      let rawForce = (q_rod * -1) * (105000 / dSq);
+      rawForce = constrain(rawForce, -3.5, 3.5); // 급발진 방지 상한선
       
-      fx += (dx / d) * forceMag;
-      fy += (dy / d) * forceMag;
+      fx += (dx / d) * rawForce;
+      fy += (dy / d) * rawForce;
     }
 
     e.update(fx, fy);
     e.draw();
   }
+}
+
+// ----------------------------------------------------
+// 금속박 벌어짐 각도 계산 (물리적 척력 비례)
+// ----------------------------------------------------
+function updateLeafAngle() {
+  // 하단(y > 420)에 위치한 전자 수 카운트
+  let electronsInLeaves = 0;
+  for (let e of electrons) {
+    if (e.y > 420) electronsInLeaves++;
+  }
+  
+  // 하단 원자핵 수 = 4개
+  // 하단 영역의 순전하량 편차 = |전자 수 - 4|
+  let chargeImbalance = abs(electronsInLeaves - 4);
+
+  // 불균형 전하가 클수록 목표 각도 증가 (최소 5도 ~ 최대 42도)
+  let targetAngle = map(chargeImbalance, 0, 4, 5, 42);
+  targetAngle = constrain(targetAngle, 5, 42);
+
+  // 부드러운 회전 보간 (LERP: 매 프레임 10%씩 목표값으로 접근)
+  currentLeafAngle = lerp(currentLeafAngle, targetAngle, 0.1);
+}
+
+// ----------------------------------------------------
+// 검전기 외형 렌더링 (수정된 금속박 회전 좌표계)
+// ----------------------------------------------------
+function drawElectroscopeBody() {
+  stroke(180);
+  strokeWeight(3);
+  fill(235, 235, 240);
+
+  // 상단 금속판 & 중앙 기둥
+  rectMode(CENTER);
+  rect(300, 215, 200, 40, 10);
+  rect(300, 325, 24, 190);
+
+  // 힌지 연결부 원
+  fill(160);
+  circle(300, 425, 14);
+
+  // 좌측 금속박
+  push();
+  translate(300, 425);
+  rotate(radians(-currentLeafAngle));
+  fill(225, 225, 235);
+  rectMode(CORNER);
+  rect(-10, 0, 10, 110, 3);
+  pop();
+
+  // 우측 금속박
+  push();
+  translate(300, 425);
+  rotate(radians(currentLeafAngle));
+  fill(225, 225, 235);
+  rectMode(CORNER);
+  rect(0, 0, 10, 110, 3);
+  pop();
 }
 
 // ----------------------------------------------------
@@ -119,12 +182,11 @@ function drawBtn(x, y, txt, isActive) {
 }
 
 // ----------------------------------------------------
-// 기둥 양옆 알짜힘 벡터 (화살표 시각화)
+// 기둥 양옆 알짜힘 벡터
 // ----------------------------------------------------
 function drawStemVectors() {
-  // [수정됨] 거리가 가까워질수록(170) 화살표 길이가 커지도록(120) 매핑 
-  let distFactor = map(rod.y, 90, 170, 30, 120);
-  distFactor = constrain(distFactor, 30, 120);
+  let distFactor = map(rod.y, 90, 170, 30, 110);
+  distFactor = constrain(distFactor, 30, 110);
 
   let upLen = 0;   
   let downLen = 0; 
@@ -133,11 +195,11 @@ function drawStemVectors() {
     upLen = distFactor * 0.5;
     downLen = distFactor * 0.5;
   } else if (rod.type === 'positive') {
-    upLen = distFactor * 1.5;
+    upLen = distFactor * 1.4;
     downLen = distFactor * 0.2;
   } else if (rod.type === 'negative') {
     upLen = distFactor * 0.2;
-    downLen = distFactor * 1.5;
+    downLen = distFactor * 1.4;
   }
 
   let centerY = 330;
@@ -167,7 +229,7 @@ function drawArrow(x1, y1, x2, y2, col) {
 }
 
 // ----------------------------------------------------
-// 대전체 및 검전기 외형
+// 대전체 설정
 // ----------------------------------------------------
 function setRodType(type) {
   rod.type = type;
@@ -213,27 +275,6 @@ function drawRod() {
     e.update(0, 0);
     e.draw();
   }
-}
-
-function drawElectroscopeBody() {
-  stroke(180);
-  strokeWeight(3);
-  fill(235, 235, 240);
-  rectMode(CENTER);
-  rect(300, 215, 200, 40, 10);
-  rect(300, 330, 24, 200);
-
-  push();
-  translate(300, 430);
-  rotate(radians(-15));
-  rect(-15, 60, 16, 120, 4);
-  pop();
-
-  push();
-  translate(300, 430);
-  rotate(radians(15));
-  rect(15, 60, 16, 120, 4);
-  pop();
 }
 
 function mousePressed() {
@@ -290,18 +331,15 @@ class Electron {
     this.vx = 0;
     this.vy = 0;
     this.isFree = isFree; 
-    this.anchor = anchor; // 자유 전자의 경우 '고향 원자핵' 위치 기억용
+    this.anchor = anchor;
   }
   update(fx, fy) {
     if (this.isFree) {
-      // [수정됨] 중성일 때 원래 자리로 돌아가려는 미세한 복원력(Restoring Force) 작용
       if (this.anchor) {
         let dx = this.anchor.x - this.x;
         let dy = this.anchor.y - this.y;
         let d = max(dist(this.x, this.y, this.anchor.x, this.anchor.y), 1);
-        
-        // 외부 대전체의 힘이 강하면 이 복원력을 무시하고 끌려가도록 최대값을 작게 제한
-        let restoreForce = min(d * 0.03, 1.5); 
+        let restoreForce = min(d * 0.025, 1.2); 
         fx += (dx / d) * restoreForce;
         fy += (dy / d) * restoreForce;
       }
@@ -316,14 +354,16 @@ class Electron {
       this.y = constrain(this.y, 200, 530);
       if (this.y < 235) {
         this.x = constrain(this.x, 220, 380); 
-      } else if (this.y < 430) {
-        this.x = constrain(this.x, 285, 315); 
+      } else if (this.y < 420) {
+        this.x = constrain(this.x, 288, 312); 
       } else {
-        this.x = constrain(this.x, 260, 340); 
+        // 금속박이 벌어지는 각도에 맞춰 하단 가로 이동 폭도 비례 확장
+        let leafSpread = map(currentLeafAngle, 5, 42, 20, 65);
+        this.x = constrain(this.x, 300 - leafSpread, 300 + leafSpread); 
       }
     } else if (this.anchor) {
-      let targetX = this.anchor.x + 8 + fx * 4; 
-      let targetY = this.anchor.y + fy * 4;
+      let targetX = this.anchor.x + 8 + fx * 3; 
+      let targetY = this.anchor.y + fy * 3;
       let d = dist(this.anchor.x, this.anchor.y, targetX, targetY);
       let maxRadius = 14; 
       if (d > maxRadius) {
