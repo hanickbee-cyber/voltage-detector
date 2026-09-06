@@ -1,5 +1,5 @@
 // ==========================================
-// 검전기 시뮬레이션 (구속 전자 겹침 버그 수정)
+// 검전기 시뮬레이션 (전하량 및 복원력 완벽 적용)
 // ==========================================
 
 let nuclei = [];
@@ -48,7 +48,6 @@ function draw() {
 
   drawUI();
 
-  // 금속박 각도 계산
   let leafElectrons = 0;
   for (let e of electrons) {
     if (e.y > 420) leafElectrons++; 
@@ -136,3 +135,207 @@ function drawBtn(x, y, txt, isActive) {
   noStroke();
   textAlign(CENTER, CENTER);
   textSize(15);
+  textStyle(BOLD);
+  text(txt, x, y);
+  pop();
+}
+
+function drawStemVectors() {
+  let distFactor = map(rod.y, 90, 170, 30, 120);
+  distFactor = constrain(distFactor, 30, 120);
+
+  let upLen = (rod.type === 'neutral') ? distFactor * 0.5 : (rod.type === 'positive') ? distFactor * 1.5 : distFactor * 0.2;
+  let downLen = (rod.type === 'neutral') ? distFactor * 0.5 : (rod.type === 'positive') ? distFactor * 0.2 : distFactor * 1.5;
+
+  let centerY = 330;
+  let leftX = 240;  
+  let rightX = 360; 
+
+  drawArrow(leftX, centerY + upLen/2, leftX, centerY - upLen/2, color(240, 90, 90));
+  fill(240, 90, 90); noStroke(); textAlign(CENTER); textSize(14);
+  text("인력", leftX, centerY + upLen/2 + 20);
+
+  drawArrow(rightX, centerY - downLen/2, rightX, centerY + downLen/2, color(70, 130, 240));
+  fill(70, 130, 240); noStroke(); textAlign(CENTER); textSize(14);
+  text("척력", rightX, centerY - downLen/2 - 10);
+}
+
+function drawArrow(x1, y1, x2, y2, col) {
+  push();
+  stroke(col);
+  strokeWeight(5);
+  fill(col);
+  line(x1, y1, x2, y2);
+  let angle = atan2(y2 - y1, x2 - x1);
+  translate(x2, y2);
+  rotate(angle);
+  triangle(-12, -8, -12, 8, 0, 0);
+  pop();
+}
+
+function setRodType(type) {
+  rod.type = type;
+  rod.nuclei = [];
+  rod.electrons = [];
+  
+  let nCols = [-50, 0, 50];
+  for (let ox of nCols) {
+    rod.nuclei.push(new Nucleus(rod.x + ox, rod.y, 'rod'));
+  }
+
+  let eCols = [];
+  if (type === 'neutral') {
+    eCols = [-50, 0, 50]; 
+  } else if (type === 'positive') {
+    eCols = [0]; 
+  } else if (type === 'negative') {
+    eCols = [-60, -30, 0, 30, 60]; 
+  }
+  
+  for (let ox of eCols) {
+    let anchor = rod.nuclei[1]; 
+    let minDist = 999;
+    for (let n of rod.nuclei) {
+      let d = abs(ox - (n.x - rod.x));
+      if (d < minDist) { minDist = d; anchor = n; }
+    }
+    let e = new Electron(rod.x + ox, rod.y, false, anchor);
+    e.ox = ox; 
+    rod.electrons.push(e);
+  }
+}
+
+function drawRod() {
+  rectMode(CENTER);
+  stroke(150);
+  strokeWeight(2);
+  fill(250, 250, 210, 220); 
+  rect(rod.x, rod.y, rod.w, rod.h, 8);
+
+  for (let i = 0; i < rod.nuclei.length; i++) {
+    let ox = (i - 1) * 50;
+    rod.nuclei[i].x = rod.x + ox;
+    rod.nuclei[i].y = rod.y;
+    rod.nuclei[i].draw();
+  }
+
+  for (let e of rod.electrons) {
+    e.x = rod.x + e.ox;
+    e.y = rod.y + 12; 
+    e.draw(); 
+  }
+}
+
+function drawElectroscopeBody() {
+  stroke(180);
+  strokeWeight(3);
+  fill(235, 235, 240);
+  rectMode(CENTER);
+  
+  rect(300, 215, 200, 40, 10);
+  rect(300, 330, 24, 200);
+
+  push();
+  translate(300, 430);
+  rotate(leafAngle);
+  rect(-8, 60, 16, 120, 4);
+  pop();
+
+  push();
+  translate(300, 430);
+  rotate(-leafAngle);
+  rect(8, 60, 16, 120, 4);
+  pop();
+}
+
+function mousePressed() {
+  if (mouseY > 20 && mouseY < 60) {
+    if (mouseX > 60 && mouseX < 180) setRodType('neutral');
+    if (mouseX > 240 && mouseX < 360) setRodType('positive');
+    if (mouseX > 420 && mouseX < 540) setRodType('negative');
+    return;
+  }
+  if (mouseX > rod.x - rod.w / 2 && mouseX < rod.x + rod.w / 2 &&
+      mouseY > rod.y - rod.h / 2 && mouseY < rod.y + rod.h / 2) {
+    rod.isDragging = true;
+    rod.offsetX = rod.x - mouseX;
+    rod.offsetY = rod.y - mouseY;
+  }
+}
+
+function mouseDragged() {
+  if (rod.isDragging) {
+    rod.x = mouseX + rod.offsetX;
+    let targetY = mouseY + rod.offsetY;
+    rod.y = constrain(targetY, 90, 170);
+  }
+}
+
+function mouseReleased() {
+  rod.isDragging = false;
+}
+
+class Nucleus {
+  constructor(x, y, region) {
+    this.x = x;
+    this.y = y;
+    this.region = region; 
+    this.distY = 0; 
+  }
+  draw() {
+    fill(240, 90, 90);
+    noStroke();
+    circle(this.x, this.y, 22);
+    fill(255);
+    textSize(14);
+    textAlign(CENTER, CENTER);
+    text('+', this.x, this.y - 1);
+  }
+}
+
+class Electron {
+  constructor(x, y, isFree, anchor = null) {
+    this.x = x;
+    this.y = y;
+    this.vx = 0;
+    this.vy = 0;
+    this.isFree = isFree; 
+    this.anchor = anchor; 
+    this.ox = 0; 
+  }
+  
+  update(fx, fy) {
+    if (this.isFree) {
+      this.vx += fx;
+      this.vy += fy;
+      this.vx *= 0.82; 
+      this.vy *= 0.82;
+      this.x += this.vx;
+      this.y += this.vy;
+      
+      this.y = constrain(this.y, 200, 560);
+      if (this.y < 235) {
+        this.x = constrain(this.x, 210, 390); 
+      } else if (this.y < 430) {
+        this.x = constrain(this.x, 280, 320); 
+      } else {
+        this.x = constrain(this.x, 220, 380); 
+      }
+    } 
+  }
+  
+  draw() {
+    if (!this.isFree && this.anchor) {
+      stroke(180, 180, 220);
+      strokeWeight(1);
+      line(this.x, this.y, this.anchor.x, this.anchor.y);
+    }
+    fill(70, 130, 240);
+    noStroke();
+    circle(this.x, this.y, 16);
+    fill(255);
+    textSize(12);
+    textAlign(CENTER, CENTER);
+    text('-', this.x, this.y - 1);
+  }
+}
