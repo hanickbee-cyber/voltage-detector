@@ -1,5 +1,5 @@
 // ==========================================
-// 검전기 시뮬레이션 (버튼 UI 및 벡터 추가)
+// 검전기 시뮬레이션 (분리된 알짜힘 벡터 및 전자 이동)
 // ==========================================
 
 let nuclei = [];
@@ -13,7 +13,7 @@ let rod = {
   isDragging: false,
   offsetX: 0,
   offsetY: 0,
-  type: 'neutral', // 'neutral', 'positive', 'negative'
+  type: 'neutral',
   nuclei: [],
   electrons: []
 };
@@ -21,54 +21,53 @@ let rod = {
 function setup() {
   createCanvas(600, 700);
   
-  // 1. 검전기 내부 원자핵 배치
-  nuclei.push(new Nucleus(230, 215, 'plate'));
+  // 검전기 내부 원자핵 배치
+  nuclei.push(new Nucleus(240, 215, 'plate'));
   nuclei.push(new Nucleus(280, 215, 'plate'));
   nuclei.push(new Nucleus(320, 215, 'plate'));
-  nuclei.push(new Nucleus(370, 215, 'plate'));
+  nuclei.push(new Nucleus(360, 215, 'plate'));
   nuclei.push(new Nucleus(300, 290, 'stem'));
   nuclei.push(new Nucleus(300, 370, 'stem'));
-  nuclei.push(new Nucleus(280, 460, 'leaf_L'));
-  nuclei.push(new Nucleus(270, 520, 'leaf_L'));
-  nuclei.push(new Nucleus(320, 460, 'leaf_R'));
-  nuclei.push(new Nucleus(330, 520, 'leaf_R'));
+  nuclei.push(new Nucleus(285, 460, 'leaf_L'));
+  nuclei.push(new Nucleus(275, 520, 'leaf_L'));
+  nuclei.push(new Nucleus(315, 460, 'leaf_R'));
+  nuclei.push(new Nucleus(325, 520, 'leaf_R'));
 
-  // 2. 검전기 내부 자유 전자 배치
+  // 검전기 내부 자유 전자 배치 (원자핵 위치 기반으로 시작)
   for (let n of nuclei) {
-    electrons.push(new Electron(n.x + random(-5, 5), n.y + random(-5, 5), true));
+    electrons.push(new Electron(n.x, n.y, true));
   }
 
-  // 3. 대전체 초기화
   setRodType('neutral');
 }
 
 function draw() {
   background(245);
 
-  // 상단 UI 버튼 그리기
   drawUI();
-
-  // 검전기 외형 그리기
   drawElectroscopeBody();
-
-  // 대전체와 알짜힘 벡터 그리기
   drawRod();
-  drawForceVectors();
+  
+  // 1. 기둥 양옆의 화살표 그리기 및 알짜힘 계산
+  let netForceY = drawStemVectors();
 
   // 검전기 원자핵 렌더링
   for (let n of nuclei) {
     n.draw();
   }
 
-  // 검전기 자유 전자 렌더링
+  // 2. 자유 전자 이동 및 렌더링 (알짜힘 적용)
   for (let e of electrons) {
-    e.update(0, 0);
+    // 자유전자에게 계산된 위아래 알짜힘(netForceY)을 전달
+    // x축으로는 랜덤한 미세 진동을 주어 자연스럽게 흩어지게 함
+    let randomX = random(-0.2, 0.2); 
+    e.update(randomX, netForceY * 0.02); 
     e.draw();
   }
 }
 
 // ----------------------------------------------------
-// UI 및 인터랙션 로직
+// UI 및 상호작용
 // ----------------------------------------------------
 function drawUI() {
   drawBtn(120, 40, "중성 (0)", rod.type === 'neutral');
@@ -100,71 +99,80 @@ function drawBtn(x, y, txt, isActive) {
 }
 
 // ----------------------------------------------------
-// 알짜힘 벡터 (화살표) 그리기
+// 기둥 양옆 알짜힘 벡터 (화살표)
 // ----------------------------------------------------
-function drawForceVectors() {
-  // 거리가 가까워질수록 화살표가 길어지도록 매핑 (최대 길이 90, 최소 길이 20)
-  let distFactor = map(rod.y, 80, 160, 20, 90);
-  distFactor = constrain(distFactor, 20, 90);
+function drawStemVectors() {
+  // 대전체가 가까울수록 벡터 길이가 커짐 (최대 100, 최소 30)
+  let distFactor = map(rod.y, 90, 170, 100, 30);
+  distFactor = constrain(distFactor, 30, 100);
 
-  let attractLen = 0; // 붉은색 (인력)
-  let repelLen = 0;   // 푸른색 (척력)
+  let upLen = 0;   // 위(금속판 방향)로 당기는 인력
+  let downLen = 0; // 아래(금속박 방향)로 미는 척력
 
   if (rod.type === 'neutral') {
-    attractLen = distFactor;
-    repelLen = distFactor;
+    upLen = distFactor * 0.5;
+    downLen = distFactor * 0.5;
   } else if (rod.type === 'positive') {
-    attractLen = distFactor * 1.5;
-    repelLen = distFactor * 0.4;
+    upLen = distFactor * 1.5;
+    downLen = distFactor * 0.2;
   } else if (rod.type === 'negative') {
-    attractLen = distFactor * 0.4;
-    repelLen = distFactor * 1.5;
+    upLen = distFactor * 0.2;
+    downLen = distFactor * 1.5;
   }
 
-  let startX = rod.x;
-  let startY = rod.y + rod.h / 2 + 10;
+  let centerY = 330;
+  let leftX = 240;  // 기둥 좌측
+  let rightX = 360; // 기둥 우측
 
-  // 척력 화살표 (푸른색, 약간 왼쪽)
-  drawArrow(startX - 15, startY, repelLen, color(70, 130, 240));
-  // 인력 화살표 (붉은색, 약간 오른쪽)
-  drawArrow(startX + 15, startY, attractLen, color(240, 90, 90));
+  // 좌측: 위를 향하는 붉은색 화살표 (인력)
+  drawArrow(leftX, centerY + upLen/2, leftX, centerY - upLen/2, color(240, 90, 90));
+  fill(240, 90, 90); noStroke(); textAlign(CENTER); textSize(14);
+  text("인력", leftX, centerY + upLen/2 + 20);
+
+  // 우측: 아래를 향하는 푸른색 화살표 (척력)
+  drawArrow(rightX, centerY - downLen/2, rightX, centerY + downLen/2, color(70, 130, 240));
+  fill(70, 130, 240); noStroke(); textAlign(CENTER); textSize(14);
+  text("척력", rightX, centerY - downLen/2 - 10);
+
+  // 전자가 받을 최종 알짜힘 반환 (다운 길이 - 업 길이)
+  // 양수면 아래로 이동, 음수면 위로 이동
+  return downLen - upLen; 
 }
 
-function drawArrow(x, y, len, col) {
+// 시작점(x1, y1)에서 끝점(x2, y2)으로 화살표를 그리는 함수
+function drawArrow(x1, y1, x2, y2, col) {
   push();
   stroke(col);
-  strokeWeight(4);
+  strokeWeight(5);
   fill(col);
-  translate(x, y);
-  line(0, 0, 0, len);
-  // 화살촉 그리기
-  translate(0, len);
-  triangle(-7, -9, 7, -9, 0, 3);
+  line(x1, y1, x2, y2);
+  
+  let angle = atan2(y2 - y1, x2 - x1);
+  translate(x2, y2);
+  rotate(angle);
+  triangle(-12, -8, -12, 8, 0, 0); // 화살촉
   pop();
 }
 
 // ----------------------------------------------------
-// 대전체 전하량 설정 및 입자 생성
+// 대전체 및 검전기 외형
 // ----------------------------------------------------
 function setRodType(type) {
   rod.type = type;
   rod.nuclei = [];
   rod.electrons = [];
   
-  // 원자핵은 항상 3개 고정
   let nCols = [-50, 0, 50];
   for (let ox of nCols) {
     rod.nuclei.push(new Nucleus(rod.x + ox, rod.y, 'rod'));
   }
 
-  // 전하 종류에 따라 전자 개수 및 위치 조정
   let eCols = [];
-  if (type === 'neutral') eCols = [-50, 0, 50]; // 3개 (균형)
-  else if (type === 'positive') eCols = [0]; // 1개 (전자 부족)
-  else if (type === 'negative') eCols = [-55, -25, 0, 25, 55]; // 5개 (전자 과잉)
+  if (type === 'neutral') eCols = [-50, 0, 50]; 
+  else if (type === 'positive') eCols = [0]; 
+  else if (type === 'negative') eCols = [-55, -25, 0, 25, 55]; 
 
   for (let ox of eCols) {
-    // 가장 가까운 원자핵을 찾아 구속시킴
     let anchor = rod.nuclei[1]; 
     let minDist = 999;
     for (let n of rod.nuclei) {
@@ -220,15 +228,13 @@ function drawElectroscopeBody() {
 // 이벤트 핸들러
 // ----------------------------------------------------
 function mousePressed() {
-  // 1. UI 버튼 클릭 판정
   if (mouseY > 20 && mouseY < 60) {
     if (mouseX > 60 && mouseX < 180) setRodType('neutral');
     if (mouseX > 240 && mouseX < 360) setRodType('positive');
     if (mouseX > 420 && mouseX < 540) setRodType('negative');
-    return; // 버튼을 눌렀다면 드래그 판정을 생략
+    return;
   }
 
-  // 2. 대전체 드래그 판정
   if (mouseX > rod.x - rod.w / 2 && mouseX < rod.x + rod.w / 2 &&
       mouseY > rod.y - rod.h / 2 && mouseY < rod.y + rod.h / 2) {
     rod.isDragging = true;
@@ -241,7 +247,6 @@ function mouseDragged() {
   if (rod.isDragging) {
     rod.x = mouseX + rod.offsetX;
     let targetY = mouseY + rod.offsetY;
-    // UI(60) 아래, 금속판(170) 위에서만 움직이도록 제한
     rod.y = constrain(targetY, 90, 170);
   }
 }
@@ -251,7 +256,7 @@ function mouseReleased() {
 }
 
 // ==========================================
-// 클래스 정의 (Nucleus, Electron)
+// 클래스 정의
 // ==========================================
 class Nucleus {
   constructor(x, y, region) {
@@ -285,11 +290,26 @@ class Electron {
     if (this.isFree) {
       this.vx += fx;
       this.vy += fy;
-      this.vx *= 0.85; 
+      this.vx *= 0.85; // 마찰력 (감속)
       this.vy *= 0.85;
       this.x += this.vx;
       this.y += this.vy;
+      
+      // ★ 자유 전자가 검전기 밖으로 나가지 못하게 경계선 설정
+      // 금속판(y=200)부터 금속박(y=530)까지만 이동 가능
+      this.y = constrain(this.y, 200, 530);
+      
+      // y위치에 따라 x축(가로) 이동 가능 범위를 제한하여 금속 모양 안에 가둠
+      if (this.y < 235) {
+        this.x = constrain(this.x, 220, 380); // 금속판 영역
+      } else if (this.y < 430) {
+        this.x = constrain(this.x, 285, 315); // 기둥 영역
+      } else {
+        this.x = constrain(this.x, 260, 340); // 금속박 영역
+      }
+
     } else if (this.anchorNucleus) {
+      // 대전체 내부 구속 전자
       let targetX = this.anchorNucleus.x + 8 + fx * 4; 
       let targetY = this.anchorNucleus.y + fy * 4;
       let d = dist(this.anchorNucleus.x, this.anchorNucleus.y, targetX, targetY);
