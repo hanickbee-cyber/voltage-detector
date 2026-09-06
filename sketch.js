@@ -1,11 +1,10 @@
 // ==========================================
-// 검전기 시뮬레이션 (금속박 벌어짐 물리 적용)
+// 검전기 시뮬레이션 (개선된 복원력 및 대전체 전하량)
 // ==========================================
 
 let nuclei = [];
 let electrons = [];
 
-// 금속박 각도 제어 변수 (라디안)
 let leafAngle = 0; 
 let targetLeafAngle = 0;
 
@@ -25,7 +24,6 @@ let rod = {
 function setup() {
   createCanvas(600, 700);
   
-  // 1. 금속판과 막대 원자핵
   nuclei.push(new Nucleus(240, 215, 'plate'));
   nuclei.push(new Nucleus(280, 215, 'plate'));
   nuclei.push(new Nucleus(320, 215, 'plate'));
@@ -33,14 +31,11 @@ function setup() {
   nuclei.push(new Nucleus(300, 290, 'stem'));
   nuclei.push(new Nucleus(300, 370, 'stem'));
   
-  // 2. 금속박 원자핵 (회전 중심 300, 430 기준)
-  // distY: 회전 중심으로부터 아래로 떨어진 거리
   let nl1 = new Nucleus(292, 460, 'leaf_L'); nl1.distY = 30; nuclei.push(nl1);
   let nl2 = new Nucleus(292, 520, 'leaf_L'); nl2.distY = 90; nuclei.push(nl2);
   let nr1 = new Nucleus(308, 460, 'leaf_R'); nr1.distY = 30; nuclei.push(nr1);
   let nr2 = new Nucleus(308, 520, 'leaf_R'); nr2.distY = 90; nuclei.push(nr2);
 
-  // 3. 자유 전자 생성
   for (let n of nuclei) {
     electrons.push(new Electron(n.x, n.y, true, n));
   }
@@ -53,39 +48,25 @@ function draw() {
 
   drawUI();
 
-  // ----------------------------------------------------
-  // 금속박 각도 계산 및 원자핵 위치 동기화
-  // ----------------------------------------------------
   let leafElectrons = 0;
   for (let e of electrons) {
-    if (e.y > 420) leafElectrons++; // 금속박 영역에 있는 전자 수 카운트
+    if (e.y > 420) leafElectrons++; 
   }
   
-  // 금속박의 알짜 전하량 = |원자핵 4개 - 현재 전자 수|
   let netCharge = abs(4 - leafElectrons);
-  
-  // 전하량 0이면 0도, 최대 45도(PI/4)까지 벌어지도록 매핑
   targetLeafAngle = constrain(netCharge * 0.2, 0, PI/4);
-  
-  // 부드러운 애니메이션 (Lerp)
   leafAngle = lerp(leafAngle, targetLeafAngle, 0.1);
 
-  // 금속박 원자핵들의 좌표를 회전 각도에 맞춰 업데이트
   for (let n of nuclei) {
     if (n.region === 'leaf_L') {
-      // 왼쪽 금속박 회전 (양수 각도 = 왼쪽으로 벌어짐)
       n.x = 300 - 8 * cos(leafAngle) - n.distY * sin(leafAngle);
       n.y = 430 - 8 * sin(leafAngle) + n.distY * cos(leafAngle);
     } else if (n.region === 'leaf_R') {
-      // 오른쪽 금속박 회전 (음수 각도 = 오른쪽으로 벌어짐)
       n.x = 300 + 8 * cos(-leafAngle) - n.distY * sin(-leafAngle);
       n.y = 430 + 8 * sin(-leafAngle) + n.distY * cos(-leafAngle);
     }
   }
 
-  // ----------------------------------------------------
-  // 렌더링 및 물리 업데이트
-  // ----------------------------------------------------
   drawElectroscopeBody();
   drawRod();
   drawStemVectors();
@@ -102,6 +83,7 @@ function draw() {
     let fx = random(-0.3, 0.3);
     let fy = 0;
 
+    // 대전체의 힘 계산
     if (q_rod !== 0) {
       let dx = e.x - rod.x;
       let dy = e.y - rod.y;
@@ -114,14 +96,26 @@ function draw() {
       fy += (dy / d) * forceMag;
     }
 
+    // ★ 복원력 강화 로직: 대전체의 힘이 약할 때(멀거나 중성일 때) 복원력을 강하게 적용
+    if (e.isFree && e.anchor) {
+      let restoreDx = e.anchor.x - e.x;
+      let restoreDy = e.anchor.y - e.y;
+      let restoreDist = max(dist(e.x, e.y, e.anchor.x, e.anchor.y), 1);
+      
+      // 대전체가 중성이거나 거리가 멀면 복원력(0.1) 증가, 가까우면 쿨롱 힘이 이기도록 복원력(0.02) 감소
+      let restoreFactor = (rod.type === 'neutral' || rod.y < 120) ? 0.1 : 0.02; 
+      let restoreForce = min(restoreDist * restoreFactor, 2.5); // 최대 복원력 제한
+      
+      fx += (restoreDx / restoreDist) * restoreForce;
+      fy += (restoreDy / restoreDist) * restoreForce;
+    }
+
     e.update(fx, fy);
     e.draw();
   }
 }
 
-// ----------------------------------------------------
-// UI 및 상호작용
-// ----------------------------------------------------
+// ... (drawUI, drawBtn, drawStemVectors, drawArrow 함수는 이전과 동일)
 function drawUI() {
   drawBtn(120, 40, "중성 (0)", rod.type === 'neutral');
   drawBtn(300, 40, "(+) 대전체", rod.type === 'positive');
@@ -184,21 +178,32 @@ function drawArrow(x1, y1, x2, y2, col) {
 }
 
 // ----------------------------------------------------
-// 대전체 및 검전기 외형
+// 대전체 및 검전기 외형 (수정됨)
 // ----------------------------------------------------
 function setRodType(type) {
   rod.type = type;
   rod.nuclei = [];
   rod.electrons = [];
   
+  // 원자핵은 항상 3개 (x 좌표 오프셋)
   let nCols = [-50, 0, 50];
   for (let ox of nCols) {
     rod.nuclei.push(new Nucleus(rod.x + ox, rod.y, 'rod'));
   }
 
-  let eCols = (type === 'neutral') ? [-50, 0, 50] : (type === 'positive') ? [0] : [-55, -25, 0, 25, 55]; 
+  // ★ 수정됨: 전하 종류에 따른 전자 개수 명확히 분리
+  let eCols = [];
+  if (type === 'neutral') {
+    eCols = [-50, 0, 50]; // 3개
+  } else if (type === 'positive') {
+    eCols = [0]; // 1개 (전자 부족)
+  } else if (type === 'negative') {
+    // 5개 (전자 과잉). 시각적으로 균형 있게 배치
+    eCols = [-60, -30, 0, 30, 60]; 
+  }
   
   for (let ox of eCols) {
+    // 가장 가까운 원자핵을 찾아 앵커로 설정
     let anchor = rod.nuclei[1]; 
     let minDist = 999;
     for (let n of rod.nuclei) {
@@ -224,6 +229,7 @@ function drawRod() {
   }
 
   for (let e of rod.electrons) {
+    // 구속 전자는 외부 힘에 영향 받지 않고 그려지기만 함
     e.update(0, 0);
     e.draw();
   }
@@ -235,18 +241,15 @@ function drawElectroscopeBody() {
   fill(235, 235, 240);
   rectMode(CENTER);
   
-  // 금속판 및 기둥
   rect(300, 215, 200, 40, 10);
   rect(300, 330, 24, 200);
 
-  // 왼쪽 금속박 (동적 각도 적용)
   push();
   translate(300, 430);
   rotate(leafAngle);
   rect(-8, 60, 16, 120, 4);
   pop();
 
-  // 오른쪽 금속박 (동적 각도 적용)
   push();
   translate(300, 430);
   rotate(-leafAngle);
@@ -289,7 +292,7 @@ class Nucleus {
     this.x = x;
     this.y = y;
     this.region = region; 
-    this.distY = 0; // 금속박 회전 계산용 속성
+    this.distY = 0; 
   }
   draw() {
     fill(240, 90, 90);
@@ -311,17 +314,10 @@ class Electron {
     this.isFree = isFree; 
     this.anchor = anchor; 
   }
+  
   update(fx, fy) {
     if (this.isFree) {
-      if (this.anchor) {
-        let dx = this.anchor.x - this.x;
-        let dy = this.anchor.y - this.y;
-        let d = max(dist(this.x, this.y, this.anchor.x, this.anchor.y), 1);
-        let restoreForce = min(d * 0.05, 1.5); // 복원력을 살짝 높여서 흔들리는 금속박을 잘 따라가게 함
-        fx += (dx / d) * restoreForce;
-        fy += (dy / d) * restoreForce;
-      }
-
+      // 복원력은 draw() 루프 안에서 외부 힘(fx, fy)에 더해져서 전달됨
       this.vx += fx;
       this.vy += fy;
       this.vx *= 0.82; 
@@ -329,14 +325,13 @@ class Electron {
       this.x += this.vx;
       this.y += this.vy;
       
-      // 자유 전자의 이동 경계선 완화 (벌어지는 금속박 밖으로 튕겨나가지 않도록)
       this.y = constrain(this.y, 200, 560);
       if (this.y < 235) {
         this.x = constrain(this.x, 210, 390); 
       } else if (this.y < 430) {
         this.x = constrain(this.x, 280, 320); 
       } else {
-        this.x = constrain(this.x, 220, 380); // 금속박이 최대로 벌어졌을 때의 너비를 수용
+        this.x = constrain(this.x, 220, 380); 
       }
     } else if (this.anchor) {
       let targetX = this.anchor.x + 8 + fx * 4; 
