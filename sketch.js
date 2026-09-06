@@ -1,9 +1,13 @@
 // ==========================================
-// 검전기 시뮬레이션 (힘 완화, 금속박 동적 개폐 적용)
+// 검전기 시뮬레이션 (금속박 벌어짐 물리 적용)
 // ==========================================
 
 let nuclei = [];
 let electrons = [];
+
+// 금속박 각도 제어 변수 (라디안)
+let leafAngle = 0; 
+let targetLeafAngle = 0;
 
 let rod = {
   x: 300,
@@ -18,24 +22,25 @@ let rod = {
   electrons: []
 };
 
-// 금속박 각도 관련 상태값
-let currentLeafAngle = 5; // 기본 살짝 벌어진 각도 (도 단위)
-
 function setup() {
   createCanvas(600, 700);
   
-  // 검전기 원자핵 배치
+  // 1. 금속판과 막대 원자핵
   nuclei.push(new Nucleus(240, 215, 'plate'));
   nuclei.push(new Nucleus(280, 215, 'plate'));
   nuclei.push(new Nucleus(320, 215, 'plate'));
   nuclei.push(new Nucleus(360, 215, 'plate'));
   nuclei.push(new Nucleus(300, 290, 'stem'));
   nuclei.push(new Nucleus(300, 370, 'stem'));
-  nuclei.push(new Nucleus(285, 460, 'leaf_L'));
-  nuclei.push(new Nucleus(275, 520, 'leaf_L'));
-  nuclei.push(new Nucleus(315, 460, 'leaf_R'));
-  nuclei.push(new Nucleus(325, 520, 'leaf_R'));
+  
+  // 2. 금속박 원자핵 (회전 중심 300, 430 기준)
+  // distY: 회전 중심으로부터 아래로 떨어진 거리
+  let nl1 = new Nucleus(292, 460, 'leaf_L'); nl1.distY = 30; nuclei.push(nl1);
+  let nl2 = new Nucleus(292, 520, 'leaf_L'); nl2.distY = 90; nuclei.push(nl2);
+  let nr1 = new Nucleus(308, 460, 'leaf_R'); nr1.distY = 30; nuclei.push(nr1);
+  let nr2 = new Nucleus(308, 520, 'leaf_R'); nr2.distY = 90; nuclei.push(nr2);
 
+  // 3. 자유 전자 생성
   for (let n of nuclei) {
     electrons.push(new Electron(n.x, n.y, true, n));
   }
@@ -47,13 +52,41 @@ function draw() {
   background(245);
 
   drawUI();
-  
-  // 1. 하단 금속박의 알짜 전하량 계산 및 각도 업데이트
-  updateLeafAngle();
 
-  // 2. 검전기 외형 그리기 (동적 각도 반영)
-  drawElectroscopeBody();
+  // ----------------------------------------------------
+  // 금속박 각도 계산 및 원자핵 위치 동기화
+  // ----------------------------------------------------
+  let leafElectrons = 0;
+  for (let e of electrons) {
+    if (e.y > 420) leafElectrons++; // 금속박 영역에 있는 전자 수 카운트
+  }
   
+  // 금속박의 알짜 전하량 = |원자핵 4개 - 현재 전자 수|
+  let netCharge = abs(4 - leafElectrons);
+  
+  // 전하량 0이면 0도, 최대 45도(PI/4)까지 벌어지도록 매핑
+  targetLeafAngle = constrain(netCharge * 0.2, 0, PI/4);
+  
+  // 부드러운 애니메이션 (Lerp)
+  leafAngle = lerp(leafAngle, targetLeafAngle, 0.1);
+
+  // 금속박 원자핵들의 좌표를 회전 각도에 맞춰 업데이트
+  for (let n of nuclei) {
+    if (n.region === 'leaf_L') {
+      // 왼쪽 금속박 회전 (양수 각도 = 왼쪽으로 벌어짐)
+      n.x = 300 - 8 * cos(leafAngle) - n.distY * sin(leafAngle);
+      n.y = 430 - 8 * sin(leafAngle) + n.distY * cos(leafAngle);
+    } else if (n.region === 'leaf_R') {
+      // 오른쪽 금속박 회전 (음수 각도 = 오른쪽으로 벌어짐)
+      n.x = 300 + 8 * cos(-leafAngle) - n.distY * sin(-leafAngle);
+      n.y = 430 + 8 * sin(-leafAngle) + n.distY * cos(-leafAngle);
+    }
+  }
+
+  // ----------------------------------------------------
+  // 렌더링 및 물리 업데이트
+  // ----------------------------------------------------
+  drawElectroscopeBody();
   drawRod();
   drawStemVectors();
 
@@ -61,92 +94,29 @@ function draw() {
     n.draw();
   }
 
-  // 3. 쿨롱 힘 계산 (70% 수준으로 스케일 다운)
   let q_rod = 0;
   if (rod.type === 'positive') q_rod = 1;
   if (rod.type === 'negative') q_rod = -1;
 
   for (let e of electrons) {
-    let fx = random(-0.2, 0.2);
+    let fx = random(-0.3, 0.3);
     let fy = 0;
 
     if (q_rod !== 0) {
       let dx = e.x - rod.x;
       let dy = e.y - rod.y;
-      let dSq = dx * dx + dy * dy;
-      dSq = max(dSq, 4000); // 근접 폭주 방지 완충값 상향
-      
+      let dSq = dx * dx + dy * dy; 
+      dSq = max(dSq, 3000); 
       let d = sqrt(dSq);
       
-      // 기존 150000 -> 105000 (정확히 70% 수준으로 완화)
-      let rawForce = (q_rod * -1) * (105000 / dSq);
-      rawForce = constrain(rawForce, -3.5, 3.5); // 급발진 방지 상한선
-      
-      fx += (dx / d) * rawForce;
-      fy += (dy / d) * rawForce;
+      let forceMag = (q_rod * -1) * (150000 / dSq); 
+      fx += (dx / d) * forceMag;
+      fy += (dy / d) * forceMag;
     }
 
     e.update(fx, fy);
     e.draw();
   }
-}
-
-// ----------------------------------------------------
-// 금속박 벌어짐 각도 계산 (물리적 척력 비례)
-// ----------------------------------------------------
-function updateLeafAngle() {
-  // 하단(y > 420)에 위치한 전자 수 카운트
-  let electronsInLeaves = 0;
-  for (let e of electrons) {
-    if (e.y > 420) electronsInLeaves++;
-  }
-  
-  // 하단 원자핵 수 = 4개
-  // 하단 영역의 순전하량 편차 = |전자 수 - 4|
-  let chargeImbalance = abs(electronsInLeaves - 4);
-
-  // 불균형 전하가 클수록 목표 각도 증가 (최소 5도 ~ 최대 42도)
-  let targetAngle = map(chargeImbalance, 0, 4, 5, 42);
-  targetAngle = constrain(targetAngle, 5, 42);
-
-  // 부드러운 회전 보간 (LERP: 매 프레임 10%씩 목표값으로 접근)
-  currentLeafAngle = lerp(currentLeafAngle, targetAngle, 0.1);
-}
-
-// ----------------------------------------------------
-// 검전기 외형 렌더링 (수정된 금속박 회전 좌표계)
-// ----------------------------------------------------
-function drawElectroscopeBody() {
-  stroke(180);
-  strokeWeight(3);
-  fill(235, 235, 240);
-
-  // 상단 금속판 & 중앙 기둥
-  rectMode(CENTER);
-  rect(300, 215, 200, 40, 10);
-  rect(300, 325, 24, 190);
-
-  // 힌지 연결부 원
-  fill(160);
-  circle(300, 425, 14);
-
-  // 좌측 금속박
-  push();
-  translate(300, 425);
-  rotate(radians(-currentLeafAngle));
-  fill(225, 225, 235);
-  rectMode(CORNER);
-  rect(-10, 0, 10, 110, 3);
-  pop();
-
-  // 우측 금속박
-  push();
-  translate(300, 425);
-  rotate(radians(currentLeafAngle));
-  fill(225, 225, 235);
-  rectMode(CORNER);
-  rect(0, 0, 10, 110, 3);
-  pop();
 }
 
 // ----------------------------------------------------
@@ -171,7 +141,6 @@ function drawBtn(x, y, txt, isActive) {
     strokeWeight(1);
   }
   rect(x, y, 120, 40, 8);
-
   fill(isActive ? 30 : 120);
   noStroke();
   textAlign(CENTER, CENTER);
@@ -181,26 +150,12 @@ function drawBtn(x, y, txt, isActive) {
   pop();
 }
 
-// ----------------------------------------------------
-// 기둥 양옆 알짜힘 벡터
-// ----------------------------------------------------
 function drawStemVectors() {
-  let distFactor = map(rod.y, 90, 170, 30, 110);
-  distFactor = constrain(distFactor, 30, 110);
+  let distFactor = map(rod.y, 90, 170, 30, 120);
+  distFactor = constrain(distFactor, 30, 120);
 
-  let upLen = 0;   
-  let downLen = 0; 
-
-  if (rod.type === 'neutral') {
-    upLen = distFactor * 0.5;
-    downLen = distFactor * 0.5;
-  } else if (rod.type === 'positive') {
-    upLen = distFactor * 1.4;
-    downLen = distFactor * 0.2;
-  } else if (rod.type === 'negative') {
-    upLen = distFactor * 0.2;
-    downLen = distFactor * 1.4;
-  }
+  let upLen = (rod.type === 'neutral') ? distFactor * 0.5 : (rod.type === 'positive') ? distFactor * 1.5 : distFactor * 0.2;
+  let downLen = (rod.type === 'neutral') ? distFactor * 0.5 : (rod.type === 'positive') ? distFactor * 0.2 : distFactor * 1.5;
 
   let centerY = 330;
   let leftX = 240;  
@@ -229,7 +184,7 @@ function drawArrow(x1, y1, x2, y2, col) {
 }
 
 // ----------------------------------------------------
-// 대전체 설정
+// 대전체 및 검전기 외형
 // ----------------------------------------------------
 function setRodType(type) {
   rod.type = type;
@@ -241,11 +196,8 @@ function setRodType(type) {
     rod.nuclei.push(new Nucleus(rod.x + ox, rod.y, 'rod'));
   }
 
-  let eCols = [];
-  if (type === 'neutral') eCols = [-50, 0, 50]; 
-  else if (type === 'positive') eCols = [0]; 
-  else if (type === 'negative') eCols = [-55, -25, 0, 25, 55]; 
-
+  let eCols = (type === 'neutral') ? [-50, 0, 50] : (type === 'positive') ? [0] : [-55, -25, 0, 25, 55]; 
+  
   for (let ox of eCols) {
     let anchor = rod.nuclei[1]; 
     let minDist = 999;
@@ -275,6 +227,31 @@ function drawRod() {
     e.update(0, 0);
     e.draw();
   }
+}
+
+function drawElectroscopeBody() {
+  stroke(180);
+  strokeWeight(3);
+  fill(235, 235, 240);
+  rectMode(CENTER);
+  
+  // 금속판 및 기둥
+  rect(300, 215, 200, 40, 10);
+  rect(300, 330, 24, 200);
+
+  // 왼쪽 금속박 (동적 각도 적용)
+  push();
+  translate(300, 430);
+  rotate(leafAngle);
+  rect(-8, 60, 16, 120, 4);
+  pop();
+
+  // 오른쪽 금속박 (동적 각도 적용)
+  push();
+  translate(300, 430);
+  rotate(-leafAngle);
+  rect(8, 60, 16, 120, 4);
+  pop();
 }
 
 function mousePressed() {
@@ -312,6 +289,7 @@ class Nucleus {
     this.x = x;
     this.y = y;
     this.region = region; 
+    this.distY = 0; // 금속박 회전 계산용 속성
   }
   draw() {
     fill(240, 90, 90);
@@ -331,7 +309,7 @@ class Electron {
     this.vx = 0;
     this.vy = 0;
     this.isFree = isFree; 
-    this.anchor = anchor;
+    this.anchor = anchor; 
   }
   update(fx, fy) {
     if (this.isFree) {
@@ -339,7 +317,7 @@ class Electron {
         let dx = this.anchor.x - this.x;
         let dy = this.anchor.y - this.y;
         let d = max(dist(this.x, this.y, this.anchor.x, this.anchor.y), 1);
-        let restoreForce = min(d * 0.025, 1.2); 
+        let restoreForce = min(d * 0.05, 1.5); // 복원력을 살짝 높여서 흔들리는 금속박을 잘 따라가게 함
         fx += (dx / d) * restoreForce;
         fy += (dy / d) * restoreForce;
       }
@@ -351,19 +329,18 @@ class Electron {
       this.x += this.vx;
       this.y += this.vy;
       
-      this.y = constrain(this.y, 200, 530);
+      // 자유 전자의 이동 경계선 완화 (벌어지는 금속박 밖으로 튕겨나가지 않도록)
+      this.y = constrain(this.y, 200, 560);
       if (this.y < 235) {
-        this.x = constrain(this.x, 220, 380); 
-      } else if (this.y < 420) {
-        this.x = constrain(this.x, 288, 312); 
+        this.x = constrain(this.x, 210, 390); 
+      } else if (this.y < 430) {
+        this.x = constrain(this.x, 280, 320); 
       } else {
-        // 금속박이 벌어지는 각도에 맞춰 하단 가로 이동 폭도 비례 확장
-        let leafSpread = map(currentLeafAngle, 5, 42, 20, 65);
-        this.x = constrain(this.x, 300 - leafSpread, 300 + leafSpread); 
+        this.x = constrain(this.x, 220, 380); // 금속박이 최대로 벌어졌을 때의 너비를 수용
       }
     } else if (this.anchor) {
-      let targetX = this.anchor.x + 8 + fx * 3; 
-      let targetY = this.anchor.y + fy * 3;
+      let targetX = this.anchor.x + 8 + fx * 4; 
+      let targetY = this.anchor.y + fy * 4;
       let d = dist(this.anchor.x, this.anchor.y, targetX, targetY);
       let maxRadius = 14; 
       if (d > maxRadius) {
