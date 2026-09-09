@@ -1,5 +1,5 @@
 // ==========================================
-// 검전기 시뮬레이션 (유리병 + 각도 민감도 최종 수정)
+// 검전기 시뮬레이션 (전자 진동 안정화 및 빗면 경계선 적용)
 // ==========================================
 
 let nuclei = [];
@@ -48,16 +48,12 @@ function draw() {
 
   drawUI();
 
-  // ★ 수정됨: 금속박 각도 계산 민감도 상향
   let leafElectrons = 0;
   for (let e of electrons) {
     if (e.y > 400) leafElectrons++; 
   }
   
   let diff = leafElectrons - 4; 
-  
-  // 전자 간 척력으로 인해 상/하단 이동량이 줄어들었으므로, 
-  // 조금만 전하량 차이가 발생해도 금속박이 크게 벌어지도록 가중치를 0.4로 고정 상향
   let angleMultiplier = 0.4; 
   
   targetLeafAngle = constrain(abs(diff) * angleMultiplier, 0, PI/4);
@@ -73,7 +69,6 @@ function draw() {
     }
   }
 
-  // 유리병 및 검전기 그리기
   drawElectroscopeBody();
   drawRod();
   drawStemVectors();
@@ -87,7 +82,8 @@ function draw() {
   if (rod.type === 'negative') q_rod = -1;
 
   for (let e of electrons) {
-    e.nextFx = random(-0.3, 0.3); 
+    // ★ 진동 원인 1 제거: 인위적인 난수(random) 진동을 극히 미세하게 줄이거나 0으로 만듦
+    e.nextFx = random(-0.02, 0.02); 
     e.nextFy = 0;
   }
 
@@ -100,10 +96,11 @@ function draw() {
       let dx = e1.x - e2.x;
       let dy = e1.y - e2.y;
       let distSq = dx * dx + dy * dy;
-      distSq = max(distSq, 900); 
+      distSq = max(distSq, 600); 
       let d = sqrt(distSq);
       
-      let repulsionForce = 3500 / distSq; 
+      // ★ 진동 원인 2 해결: 전자 간 척력의 최댓값(Cap)을 설정하여 튕겨나가는 폭주 방지
+      let repulsionForce = min(2500 / distSq, 6); 
       let fx = (dx / d) * repulsionForce;
       let fy = (dy / d) * repulsionForce;
       
@@ -127,6 +124,9 @@ function draw() {
       let d = sqrt(dSq);
       
       let forceMag = (q_rod * -1) * (150000 / dSq); 
+      // ★ 대전체의 힘도 최댓값을 제한하여 급발진 방지
+      forceMag = constrain(forceMag, -15, 15);
+      
       fx += (dx / d) * forceMag;
       fy += (dy / d) * forceMag;
     }
@@ -136,8 +136,8 @@ function draw() {
       let restoreDy = e.anchor.y - e.y;
       let restoreDist = max(dist(e.x, e.y, e.anchor.x, e.anchor.y), 1);
       
-      let restoreFactor = (rod.type === 'neutral' || rod.y < 120) ? 0.15 : 0.04; 
-      let restoreForce = min(restoreDist * restoreFactor, 3.0); 
+      let restoreFactor = (rod.type === 'neutral' || rod.y < 120) ? 0.15 : 0.03; 
+      let restoreForce = min(restoreDist * restoreFactor, 2.5); 
       
       fx += (restoreDx / restoreDist) * restoreForce;
       fy += (restoreDy / restoreDist) * restoreForce;
@@ -372,18 +372,34 @@ class Electron {
     if (this.isFree) {
       this.vx += fx;
       this.vy += fy;
-      this.vx *= 0.75; 
-      this.vy *= 0.75;
+      // ★ 마찰력을 0.75 -> 0.60으로 높여서 부들거리는 움직임을 묵직하게 잡음
+      this.vx *= 0.60; 
+      this.vy *= 0.60;
       this.x += this.vx;
       this.y += this.vy;
       
-      this.y = constrain(this.y, 200, 560);
+      this.y = constrain(this.y, 200, 545); // Y축 최하단 경계(유리병 바닥 부근)
+      
+      // ★ 수정됨: Y좌표에 따라 X축 이동 가능 범위를 동적(Dynamic)으로 깎아냄
       if (this.y < 235) {
+        // 금속판 영역
         this.x = constrain(this.x, 210, 390); 
-      } else if (this.y < 430) {
-        this.x = constrain(this.x, 280, 320); 
+      } else if (this.y < 420) {
+        // 중앙 막대 영역 (폭을 좁혀서 옆으로 튀어나가지 않게 함)
+        this.x = constrain(this.x, 288, 312); 
       } else {
-        this.x = constrain(this.x, 220, 380); 
+        // 금속박 영역 (기울어진 각도를 삼각함수로 반영하여 가둠)
+        let dy = this.y - 430; // 회전축(430)으로부터 떨어진 거리
+        
+        if (this.x < 300) {
+          // 왼쪽 금속박 내부로 전자를 가둠
+          let centerX = 300 - 8 - dy * Math.tan(leafAngle);
+          this.x = constrain(this.x, centerX - 12, centerX + 12);
+        } else {
+          // 오른쪽 금속박 내부로 전자를 가둠
+          let centerX = 300 + 8 + dy * Math.tan(leafAngle);
+          this.x = constrain(this.x, centerX - 12, centerX + 12);
+        }
       }
     } 
   }
