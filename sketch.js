@@ -1,5 +1,5 @@
 // ==========================================
-// 검전기 시뮬레이션 (전자 간 척력 추가)
+// 검전기 시뮬레이션 (금속박 벌어짐 밸런스 패치)
 // ==========================================
 
 let nuclei = [];
@@ -48,13 +48,21 @@ function draw() {
 
   drawUI();
 
+  // ★ 수정됨: 금속박 각도 밸런스 조정
   let leafElectrons = 0;
   for (let e of electrons) {
-    if (e.y > 420) leafElectrons++; 
+    // 판단 기준선을 기둥 하단(400)으로 살짝 올려서 정체된 전자도 잘 세도록 함
+    if (e.y > 400) leafElectrons++; 
   }
   
-  let netCharge = abs(4 - leafElectrons);
-  targetLeafAngle = constrain(netCharge * 0.2, 0, PI/4);
+  // 중성일 때 하단의 전자는 4개입니다. 
+  // diff > 0 이면 전자가 밀려내려온 것(- 대전체), diff < 0 이면 끌려올라간 것(+ 대전체)
+  let diff = leafElectrons - 4; 
+  
+  // 좁은 공간에 억지로 모이느라 숫자가 적은 (-) 대전체 상황일 때 가중치를 높게(0.4) 줌
+  let angleMultiplier = (diff > 0) ? 0.4 : 0.25; 
+  
+  targetLeafAngle = constrain(abs(diff) * angleMultiplier, 0, PI/4);
   leafAngle = lerp(leafAngle, targetLeafAngle, 0.1);
 
   for (let n of nuclei) {
@@ -79,13 +87,12 @@ function draw() {
   if (rod.type === 'positive') q_rod = 1;
   if (rod.type === 'negative') q_rod = -1;
 
-  // 전자 위치 업데이트 전, 각 전자가 받을 최종 힘을 누적할 변수 초기화
   for (let e of electrons) {
-    e.nextFx = random(-0.3, 0.3); // 미세 진동
+    e.nextFx = random(-0.3, 0.3); 
     e.nextFy = 0;
   }
 
-  // ★ 추가된 물리 로직: 자유 전자들 사이의 상호 척력 (O(N^2) 계산)
+  // 자유 전자 간 척력 연산
   for (let i = 0; i < electrons.length; i++) {
     for (let j = i + 1; j < electrons.length; j++) {
       let e1 = electrons[i];
@@ -94,20 +101,13 @@ function draw() {
       let dx = e1.x - e2.x;
       let dy = e1.y - e2.y;
       let distSq = dx * dx + dy * dy;
-      
-      // 전자들이 너무 가까워졌을 때 힘이 폭주하여 화면 밖으로 튕기는 것을 방지
-      distSq = max(distSq, 900); // 최소 거리 제한 강화 (30px)
-      
+      distSq = max(distSq, 900); 
       let d = sqrt(distSq);
       
-      // 척력의 세기 (값이 클수록 서로 강하게 밀어냄)
-      // (+) 대전체가 다가왔을 때 금속판(넓은 공간)에서 전자들이 고르게 퍼지도록 돕습니다.
       let repulsionForce = 3500 / distSq; 
-      
       let fx = (dx / d) * repulsionForce;
       let fy = (dy / d) * repulsionForce;
       
-      // e1은 밀려나고, e2는 반대 방향으로 밀려남 (작용-반작용)
       e1.nextFx += fx;
       e1.nextFy += fy;
       e2.nextFx -= fx;
@@ -115,12 +115,11 @@ function draw() {
     }
   }
 
-  // 대전체의 힘 및 복원력 적용
+  // 외부 힘 및 복원력 적용
   for (let e of electrons) {
     let fx = e.nextFx;
     let fy = e.nextFy;
 
-    // 1. 대전체의 쿨롱 힘
     if (q_rod !== 0) {
       let dx = e.x - rod.x;
       let dy = e.y - rod.y;
@@ -133,13 +132,11 @@ function draw() {
       fy += (dy / d) * forceMag;
     }
 
-    // 2. 고향 원자핵으로 돌아가려는 복원력
     if (e.isFree && e.anchor) {
       let restoreDx = e.anchor.x - e.x;
       let restoreDy = e.anchor.y - e.y;
       let restoreDist = max(dist(e.x, e.y, e.anchor.x, e.anchor.y), 1);
       
-      // 전자 간 척력이 추가되었으므로 복원력을 약간 더 강하게 설정하여 형태 유지
       let restoreFactor = (rod.type === 'neutral' || rod.y < 120) ? 0.15 : 0.04; 
       let restoreForce = min(restoreDist * restoreFactor, 3.0); 
       
@@ -350,7 +347,6 @@ class Electron {
     if (this.isFree) {
       this.vx += fx;
       this.vy += fy;
-      // 마찰을 조금 더 주어 전자들이 부들부들 떠는 것을 진정시킴
       this.vx *= 0.75; 
       this.vy *= 0.75;
       this.x += this.vx;
