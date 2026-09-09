@@ -1,5 +1,5 @@
 // ==========================================
-// 검전기 시뮬레이션 (유리병 디자인 추가)
+// 검전기 시뮬레이션 (유리병 + 각도 민감도 최종 수정)
 // ==========================================
 
 let nuclei = [];
@@ -48,13 +48,17 @@ function draw() {
 
   drawUI();
 
+  // ★ 수정됨: 금속박 각도 계산 민감도 상향
   let leafElectrons = 0;
   for (let e of electrons) {
     if (e.y > 400) leafElectrons++; 
   }
   
   let diff = leafElectrons - 4; 
-  let angleMultiplier = (diff > 0) ? 0.4 : 0.25; 
+  
+  // 전자 간 척력으로 인해 상/하단 이동량이 줄어들었으므로, 
+  // 조금만 전하량 차이가 발생해도 금속박이 크게 벌어지도록 가중치를 0.4로 고정 상향
+  let angleMultiplier = 0.4; 
   
   targetLeafAngle = constrain(abs(diff) * angleMultiplier, 0, PI/4);
   leafAngle = lerp(leafAngle, targetLeafAngle, 0.1);
@@ -69,7 +73,7 @@ function draw() {
     }
   }
 
-  // ★ 검전기 그리기 (유리병이 먼저 그려짐)
+  // 유리병 및 검전기 그리기
   drawElectroscopeBody();
   drawRod();
   drawStemVectors();
@@ -87,6 +91,7 @@ function draw() {
     e.nextFy = 0;
   }
 
+  // 자유 전자 간 척력 연산
   for (let i = 0; i < electrons.length; i++) {
     for (let j = i + 1; j < electrons.length; j++) {
       let e1 = electrons[i];
@@ -109,6 +114,7 @@ function draw() {
     }
   }
 
+  // 외부 힘 및 복원력 적용
   for (let e of electrons) {
     let fx = e.nextFx;
     let fy = e.nextFy;
@@ -259,29 +265,21 @@ function drawRod() {
   }
 }
 
-// ----------------------------------------------------
-// 검전기 외형 그리기 (유리병 + 금속 구조물)
-// ----------------------------------------------------
 function drawElectroscopeBody() {
   push();
-  
-  // 1. 투명한 유리병 그리기 (스케치 기반)
-  fill(210, 235, 255, 70); // 반투명한 하늘색
+  fill(210, 235, 255, 70); 
   stroke(180, 210, 240);
   strokeWeight(4);
   
   beginShape();
-  vertex(260, 235); // 목 왼쪽 위 (금속판 바로 아래)
-  vertex(260, 360); // 목 왼쪽 아래
-  // 왼쪽 불룩한 플라스크 곡선
+  vertex(260, 235); 
+  vertex(260, 360); 
   bezierVertex(140, 420, 140, 580, 240, 580); 
-  vertex(360, 580); // 바닥
-  // 오른쪽 불룩한 플라스크 곡선
+  vertex(360, 580); 
   bezierVertex(460, 580, 460, 420, 340, 360); 
-  vertex(340, 235); // 목 오른쪽 위
+  vertex(340, 235); 
   endShape(CLOSE);
 
-  // 유리병 입체감(하이라이트 반사광) 추가
   noFill();
   stroke(255, 255, 255, 200);
   strokeWeight(3);
@@ -289,10 +287,8 @@ function drawElectroscopeBody() {
   vertex(270, 370);
   bezierVertex(165, 425, 165, 560, 245, 560);
   endShape();
-  
   pop();
 
-  // 2. 금속판 및 기둥 렌더링
   stroke(180);
   strokeWeight(3);
   fill(235, 235, 240);
@@ -301,14 +297,12 @@ function drawElectroscopeBody() {
   rect(300, 215, 200, 40, 10);
   rect(300, 330, 24, 200);
 
-  // 3. 왼쪽 금속박
   push();
   translate(300, 430);
   rotate(leafAngle);
   rect(-8, 60, 16, 120, 4);
   pop();
 
-  // 4. 오른쪽 금속박
   push();
   translate(300, 430);
   rotate(-leafAngle);
