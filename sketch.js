@@ -1,5 +1,5 @@
 // ==========================================
-// 검전기 시뮬레이션 (접지 기능 최종 완성판)
+// 검전기 시뮬레이션 (접지 기능 버그 수정판)
 // ==========================================
 
 let nuclei = [];
@@ -49,21 +49,27 @@ function draw() {
 
   drawUI();
 
-  // ★ 접지 상태에 따른 전자 유출입 (애니메이션) 처리
+  // ★★★ 수정된 부분: 접지 상태에 따른 전자 유출입 처리 ★★★
   if (isGrounded && frameCount % 6 === 0) {
-    let activeElectrons = electrons.filter(e => !e.isEscaping && !e.toDelete && e.isFree);
+    // 자유 전자 + "진입 중"인 전자까지 모두 이미 확보된 몫으로 카운트
+    // (기존 코드는 isFree인 전자만 세서, 진입 애니메이션이 끝나기 전까지
+    //  목표치보다 훨씬 많은 전자를 계속 스폰하는 버그가 있었음)
+    let reservedElectrons = electrons.filter(e => !e.isEscaping && !e.toDelete && (e.isFree || e.isEntering));
     let targetCount = 10; // 중성일 때 목표 개수
     
     if (rod.type === 'positive') targetCount = 16; // 전자가 지구에서 들어옴
     if (rod.type === 'negative') targetCount = 4;  // 전자가 지구로 도망감
 
-    if (activeElectrons.length > targetCount) {
-      // 전자가 많으면 하나씩 빼내기 (접지선으로 이동)
-      let e = activeElectrons[activeElectrons.length - 1];
-      e.isEscaping = true;
-      e.isFree = false;
-    } else if (activeElectrons.length < targetCount) {
-      // 전자가 부족하면 지구에서 새로 생성하여 유입
+    if (reservedElectrons.length > targetCount) {
+      // 자유 전자 중에서만 내보내기 (이미 진입 중인 전자는 건드리지 않음)
+      let freeElectrons = reservedElectrons.filter(e => e.isFree);
+      if (freeElectrons.length > 0) {
+        let e = freeElectrons[freeElectrons.length - 1];
+        e.isEscaping = true;
+        e.isFree = false;
+      }
+    } else if (reservedElectrons.length < targetCount) {
+      // 전자가 부족하면 지구에서 새로 생성하여 유입 (진입 중인 전자도 이미 셌으므로 과다 생성 방지)
       let anchor = nuclei[int(random(4))]; // 금속판 원자핵 중 하나로 목표 설정
       let e = new Electron(480, 276, false, anchor); 
       e.isEntering = true;
