@@ -1,5 +1,5 @@
 // ==========================================
-// 검전기 시뮬레이션 (전자 진동 안정화 및 빗면 경계선 적용)
+// 검전기 시뮬레이션 (접지 기능 최종 완성판)
 // ==========================================
 
 let nuclei = [];
@@ -7,6 +7,7 @@ let electrons = [];
 
 let leafAngle = 0; 
 let targetLeafAngle = 0;
+let isGrounded = false; // ★ 접지 상태 변수 추가
 
 let rod = {
   x: 300,
@@ -48,15 +49,47 @@ function draw() {
 
   drawUI();
 
+  // ★ 접지 상태에 따른 전자 유출입 (애니메이션) 처리
+  if (isGrounded && frameCount % 6 === 0) {
+    let activeElectrons = electrons.filter(e => !e.isEscaping && !e.toDelete && e.isFree);
+    let targetCount = 10; // 중성일 때 목표 개수
+    
+    if (rod.type === 'positive') targetCount = 16; // 전자가 지구에서 들어옴
+    if (rod.type === 'negative') targetCount = 4;  // 전자가 지구로 도망감
+
+    if (activeElectrons.length > targetCount) {
+      // 전자가 많으면 하나씩 빼내기 (접지선으로 이동)
+      let e = activeElectrons[activeElectrons.length - 1];
+      e.isEscaping = true;
+      e.isFree = false;
+    } else if (activeElectrons.length < targetCount) {
+      // 전자가 부족하면 지구에서 새로 생성하여 유입
+      let anchor = nuclei[int(random(4))]; // 금속판 원자핵 중 하나로 목표 설정
+      let e = new Electron(480, 276, false, anchor); 
+      e.isEntering = true;
+      electrons.push(e);
+    }
+  }
+
+  // 삭제 예약된 전자들 정리
+  electrons = electrons.filter(e => !e.toDelete);
+
+  // 금속박 각도 계산
   let leafElectrons = 0;
   for (let e of electrons) {
-    if (e.y > 400) leafElectrons++; 
+    if (e.y > 400 && e.isFree) leafElectrons++; 
   }
   
   let diff = leafElectrons - 4; 
   let angleMultiplier = 0.4; 
   
-  targetLeafAngle = constrain(abs(diff) * angleMultiplier, 0, PI/4);
+  // ★ 물리 핵심: 접지되어 있으면 전위차 0이므로 금속박은 무조건 닫힘 (0도)
+  if (isGrounded) {
+    targetLeafAngle = 0;
+  } else {
+    targetLeafAngle = constrain(abs(diff) * angleMultiplier, 0, PI/4);
+  }
+  
   leafAngle = lerp(leafAngle, targetLeafAngle, 0.1);
 
   for (let n of nuclei) {
@@ -69,6 +102,7 @@ function draw() {
     }
   }
 
+  drawGroundWire(); // 접지선 그리기
   drawElectroscopeBody();
   drawRod();
   drawStemVectors();
@@ -82,12 +116,10 @@ function draw() {
   if (rod.type === 'negative') q_rod = -1;
 
   for (let e of electrons) {
-    // ★ 진동 원인 1 제거: 인위적인 난수(random) 진동을 극히 미세하게 줄이거나 0으로 만듦
     e.nextFx = random(-0.02, 0.02); 
     e.nextFy = 0;
   }
 
-  // 자유 전자 간 척력 연산
   for (let i = 0; i < electrons.length; i++) {
     for (let j = i + 1; j < electrons.length; j++) {
       let e1 = electrons[i];
@@ -99,7 +131,6 @@ function draw() {
       distSq = max(distSq, 600); 
       let d = sqrt(distSq);
       
-      // ★ 진동 원인 2 해결: 전자 간 척력의 최댓값(Cap)을 설정하여 튕겨나가는 폭주 방지
       let repulsionForce = min(2500 / distSq, 6); 
       let fx = (dx / d) * repulsionForce;
       let fy = (dy / d) * repulsionForce;
@@ -111,7 +142,6 @@ function draw() {
     }
   }
 
-  // 외부 힘 및 복원력 적용
   for (let e of electrons) {
     let fx = e.nextFx;
     let fy = e.nextFy;
@@ -124,7 +154,6 @@ function draw() {
       let d = sqrt(dSq);
       
       let forceMag = (q_rod * -1) * (150000 / dSq); 
-      // ★ 대전체의 힘도 최댓값을 제한하여 급발진 방지
       forceMag = constrain(forceMag, -15, 15);
       
       fx += (dx / d) * forceMag;
@@ -155,27 +184,59 @@ function drawUI() {
   drawBtn(120, 40, "중성 (0)", rod.type === 'neutral');
   drawBtn(300, 40, "(+) 대전체", rod.type === 'positive');
   drawBtn(480, 40, "(-) 대전체", rod.type === 'negative');
+  
+  // ★ 하단 중앙에 커다란 접지 토글 버튼 추가
+  drawBtn(300, 650, isGrounded ? "접지 해제 ✘" : "손가락 대기 (접지)", isGrounded, 180, isGrounded ? color(255, 200, 200) : color(240));
 }
 
-function drawBtn(x, y, txt, isActive) {
+function drawBtn(x, y, txt, isActive, w = 120, bgCol = null) {
   push();
   rectMode(CENTER);
   if (isActive) {
-    fill(220, 235, 255);
-    stroke(100, 150, 255);
+    fill(bgCol ? bgCol : color(220, 235, 255));
+    stroke(bgCol ? color(255, 100, 100) : color(100, 150, 255));
     strokeWeight(3);
   } else {
-    fill(240);
+    fill(bgCol ? bgCol : 240);
     stroke(200);
     strokeWeight(1);
   }
-  rect(x, y, 120, 40, 8);
+  rect(x, y, w, 40, 8);
   fill(isActive ? 30 : 120);
   noStroke();
   textAlign(CENTER, CENTER);
   textSize(15);
   textStyle(BOLD);
   text(txt, x, y);
+  pop();
+}
+
+// ★ 우측에 접지선과 접지 기호 렌더링
+function drawGroundWire() {
+  if (!isGrounded) return;
+  push();
+  stroke(120, 200, 120); // 초록색 도선
+  strokeWeight(4);
+  noFill();
+  
+  beginShape();
+  vertex(400, 215); // 금속판 우측
+  vertex(480, 215);
+  vertex(480, 260);
+  endShape();
+  
+  // 표준 접지 기호
+  stroke(100);
+  strokeWeight(3);
+  line(460, 260, 500, 260);
+  line(468, 268, 492, 268);
+  line(476, 276, 484, 276);
+  
+  fill(100, 180, 100);
+  noStroke();
+  textSize(13);
+  textAlign(LEFT, CENTER);
+  text("지구 (Earth)", 505, 260);
   pop();
 }
 
@@ -311,12 +372,20 @@ function drawElectroscopeBody() {
 }
 
 function mousePressed() {
+  // 상단 대전체 버튼
   if (mouseY > 20 && mouseY < 60) {
     if (mouseX > 60 && mouseX < 180) setRodType('neutral');
     if (mouseX > 240 && mouseX < 360) setRodType('positive');
     if (mouseX > 420 && mouseX < 540) setRodType('negative');
     return;
   }
+  
+  // ★ 하단 접지 버튼 판정
+  if (mouseY > 630 && mouseY < 670 && mouseX > 210 && mouseX < 390) {
+    isGrounded = !isGrounded;
+    return;
+  }
+  
   if (mouseX > rod.x - rod.w / 2 && mouseX < rod.x + rod.w / 2 &&
       mouseY > rod.y - rod.h / 2 && mouseY < rod.y + rod.h / 2) {
     rod.isDragging = true;
@@ -366,37 +435,57 @@ class Electron {
     this.ox = 0; 
     this.nextFx = 0;
     this.nextFy = 0;
+    
+    // ★ 애니메이션 플래그
+    this.isEscaping = false; 
+    this.isEntering = false;
+    this.toDelete = false;
   }
   
   update(fx, fy) {
+    // 1. 도망가는 전자 애니메이션
+    if (this.isEscaping) {
+      let targetX = 480;
+      let targetY = 276;
+      this.x = lerp(this.x, targetX, 0.1);
+      this.y = lerp(this.y, targetY, 0.1);
+      if (dist(this.x, this.y, targetX, targetY) < 5) this.toDelete = true;
+      return; 
+    }
+    
+    // 2. 들어오는 전자 애니메이션
+    if (this.isEntering) {
+      let targetX = 390; 
+      let targetY = 215;
+      this.x = lerp(this.x, targetX, 0.1);
+      this.y = lerp(this.y, targetY, 0.1);
+      if (dist(this.x, this.y, targetX, targetY) < 5) {
+        this.isEntering = false;
+        this.isFree = true; // 금속판에 도달하면 물리 엔진에 합류
+      }
+      return; 
+    }
+
     if (this.isFree) {
       this.vx += fx;
       this.vy += fy;
-      // ★ 마찰력을 0.75 -> 0.60으로 높여서 부들거리는 움직임을 묵직하게 잡음
       this.vx *= 0.60; 
       this.vy *= 0.60;
       this.x += this.vx;
       this.y += this.vy;
       
-      this.y = constrain(this.y, 200, 545); // Y축 최하단 경계(유리병 바닥 부근)
+      this.y = constrain(this.y, 200, 545); 
       
-      // ★ 수정됨: Y좌표에 따라 X축 이동 가능 범위를 동적(Dynamic)으로 깎아냄
       if (this.y < 235) {
-        // 금속판 영역
         this.x = constrain(this.x, 210, 390); 
       } else if (this.y < 420) {
-        // 중앙 막대 영역 (폭을 좁혀서 옆으로 튀어나가지 않게 함)
         this.x = constrain(this.x, 288, 312); 
       } else {
-        // 금속박 영역 (기울어진 각도를 삼각함수로 반영하여 가둠)
-        let dy = this.y - 430; // 회전축(430)으로부터 떨어진 거리
-        
+        let dy = this.y - 430; 
         if (this.x < 300) {
-          // 왼쪽 금속박 내부로 전자를 가둠
           let centerX = 300 - 8 - dy * Math.tan(leafAngle);
           this.x = constrain(this.x, centerX - 12, centerX + 12);
         } else {
-          // 오른쪽 금속박 내부로 전자를 가둠
           let centerX = 300 + 8 + dy * Math.tan(leafAngle);
           this.x = constrain(this.x, centerX - 12, centerX + 12);
         }
@@ -405,7 +494,7 @@ class Electron {
   }
   
   draw() {
-    if (!this.isFree && this.anchor) {
+    if (!this.isFree && this.anchor && !this.isEntering && !this.isEscaping) {
       stroke(180, 180, 220);
       strokeWeight(1);
       line(this.x, this.y, this.anchor.x, this.anchor.y);
